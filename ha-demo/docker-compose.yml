@@ -1,4 +1,4 @@
-version: '3.2'
+version: '3.4'
 
 secrets:
   cert:
@@ -12,8 +12,9 @@ services:
   proxy:
     image: traefik
     restart: unless-stopped
-    command: --web --docker --docker.swarmmode --docker.exposedByDefault=false --loglevel=info
+    command: --api --docker --docker.swarmmode --docker.exposedByDefault=false --loglevel=info
     deploy:
+      replicas: 1
       placement:
         # traefik needs to run on a manager node, as described in documentation
         constraints:
@@ -21,10 +22,11 @@ services:
     volumes:
       # traefik needs access to the docker socket to discover other containers
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /dev/null:/traefik.toml
+      - $PWD/acme.json:/acme.json
+      - $PWD/traefik.toml:/traefik.toml
     ports:
       - "80:80"
-      - "8080:8080"
+      - "443:443"
 
   keycloak:
     build:
@@ -52,10 +54,10 @@ services:
       - source: kcexport
         target: kcexport.json
         mode: 0444
+    volumes:
+      - ./kcexport.json:/opt/jboss/exports/kcexport.json
     depends_on:
       - postgres
-    expose:
-      - "8080"
 
   postgres:
     image: postgres:9-alpine
@@ -92,7 +94,7 @@ services:
         - "traefik.enable=true"
         - "traefik.backend=samlbridge"
         - "traefik.frontend.rule=PathPrefix:/samlbridge"
-        - "traefik.backend.loadbalancer.sticky=true"
+        - "traefik.backend.loadbalancer.stickiness=true"
     secrets:
       - source: cert
         target: server.crt
@@ -100,8 +102,10 @@ services:
       - source: key
         target: server.pem
         mode: 0444
-    expose:
-      - "80"
+    volumes:
+      - ./cert:/run/secrets
+      - ./samlbridge-sp-remote.php:/var/simplesamlphp/metadata/saml20-sp-remote.php
+      - ./samlbridge-idp-remote.php:/var/simplesamlphp/metadata/saml20-idp-remote.php
 
   samlidp:
     image: cycloneproject/samlidp-demo
@@ -119,7 +123,6 @@ services:
         - "traefik.enable=true"
         - "traefik.backend=samlidp"
         - "traefik.frontend.rule=PathPrefix:/samlidp"
-        #- "traefik.backend.loadbalancer.sticky=true"
     secrets:
       - source: cert
         target: server.crt
@@ -127,6 +130,6 @@ services:
       - source: key
         target: server.pem
         mode: 0444
-    expose:
-      - "80"
+    volumes:
+      - /dev/null:/etc/periodic/daily/metarefresh
 
