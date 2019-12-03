@@ -72,3 +72,5 @@ buildNumber.properties
 .mvn/timing.properties
 data/keycloak/db/*
 /script/kcexport.json
+!/script/local.env
+!/script/local-compiled.env
