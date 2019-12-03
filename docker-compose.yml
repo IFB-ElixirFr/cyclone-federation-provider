@@ -1,0 +1,99 @@
+version: '2'
+services:
+  traefik:
+    labels:
+      - "traefik.backend=traefik"
+      - "traefik.frontend.rule=PathPrefix:/traefik"
+      - "traefik.frontend.entryPoints=https"
+      - "traefik.port=8080"
+    image: traefik:1.7.11-alpine
+    ports:
+      - "443:443"
+      - "80:80"
+      - "8888:8080"
+    volumes:
+      - ./script/traefik.toml:/etc/traefik/traefik.toml
+      - /var/run/docker.sock:/var/run/docker.sock
+      - demo/cert:/certs
+  postgres:
+      image: postgres:9.6
+      volumes:
+        - ${HOST_DIR}/keycloak_postgresql/data:/var/lib/postgresql/data
+      environment:
+        POSTGRES_DB: keycloak
+        POSTGRES_USER: keycloak
+        POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      labels:
+        - "traefik.enable=false"
+  keycloak:
+      image: jboss/keycloak:8.0.0
+      environment:
+        DB_VENDOR: postgres
+        DB_ADDR: postgres
+        DB_DATABASE: keycloak
+        DB_USER: keycloak
+        DB_SCHEMA: public
+        DB_PASSWORD: ${POSTGRES_PASSWORD}
+        KEYCLOAK_USER: admin
+        KEYCLOAK_PASSWORD: ${KEYCLOAK_PASSWORD}
+        # Uncomment the line below if you want to specify JDBC parameters. The parameter below is just an example, and it shouldn't be used in production without knowledge. It is highly recommended that you read the PostgreSQL JDBC driver documentation in order to use it.
+        #JDBC_PARAMS: "ssl=true"
+      labels:
+        - "traefik.backend=keycloak"
+        - "traefik.frontend.rule=PathPrefix:/,/auth"
+      ports:
+        - 8080:8080
+      volumes:
+        - ./script/kcexport.json:/opt/jboss/exports/kcexport.json
+      depends_on:
+        - postgres
+
+  samlbridge:
+    image: cycloneproject/samlbridge-base
+    environment:
+      - FP_BASEURL
+      - SAMLBRIDGE_CRON
+      - SAMLBRIDGE_PASSWORD
+      - SAMLBRIDGE_SALT
+    labels:
+      - "traefik.backend=samlbridge"
+      - "traefik.frontend.rule=PathPrefix:/samlbridge"
+    volumes:
+      - ./cert:/run/secrets
+      - ./demo/samlbridge-sp-remote.php:/var/simplesamlphp/metadata/saml20-sp-remote.php
+      - ./demo/samlbridge-idp-remote.php:/var/simplesamlphp/metadata/saml20-idp-remote.php
+    expose:
+      - "80"
+
+  samlidp:
+    build:
+      context: .
+      dockerfile: Dockerfile.SamlIDP
+    image: cycloneproject/samlidp-demo
+    restart: unless-stopped
+    labels:
+      - "traefik.backend=samlidp"
+      - "traefik.frontend.rule=PathPrefix:/samlidp"
+    environment:
+      - FP_BASEURL
+      - SAMLIDP_PASSWORD
+      - SAMLIDP_SALT
+    volumes:
+      - ./demo/cert:/run/secrets
+    expose:
+      - "80"
+
+  cron:
+    image: cycloneproject/cron
+    labels:
+      - "traefik.enable=false"
+    environment:
+      - SAMLBRIDGE_CRON
+      - KEYCLOAK_USER
+      - KEYCLOAK_PASSWORD
+      - EXCLUDED_USERS
+    volumes:
+      - /dev/null:/etc/periodic/daily/metarefresh
+    depends_on:
+      - keycloak
+      - samlbridge
